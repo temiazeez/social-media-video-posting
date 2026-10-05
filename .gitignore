@@ -1,0 +1,16 @@
+*.sqlite
+*.db
+*.env
+secrets/
+credentials/
+oauth/
+
+# Source and rendered media
+*.mp4
+*.mov
+*.wav
+*.mp3
+*.png
+*.jpg
+*.jpeg
+*.webp

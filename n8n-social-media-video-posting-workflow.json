@@ -1,0 +1,553 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "Create social video posts",
+        "formDescription": "Upload one video and tell the assistant how the posts should sound.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Video",
+              "fieldType": "file",
+              "acceptFileTypes": ".mp4,.mov,.webm,.mpeg",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Instructions",
+              "fieldType": "textarea",
+              "placeholder": "Audience, tone, campaign goal, required CTA, facts, words to avoid...",
+              "requiredField": true
+            }
+          ]
+        },
+        "options": {
+          "appendAttribution": false,
+          "buttonLabel": "Analyze video"
+        }
+      },
+      "id": "e3914fa6-93e3-4f74-bf80-1392b58a3a53",
+      "name": "Submit Video and Instructions",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.2,
+      "position": [
+        -2368,
+        400
+      ],
+      "webhookId": "__REPLACE_WEBHOOKID__"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first();\nconst bins = item.binary || {};\nconst key = Object.keys(bins)[0];\nif (!key) throw new Error('No video was uploaded.');\nconst b = bins[key];\nconst allowed = ['video/mp4','video/quicktime','video/webm','video/mpeg'];\nif (b.mimeType && !allowed.includes(b.mimeType)) throw new Error(`Unsupported video type: ${b.mimeType}`);\nfunction bytes(v){ if(typeof v==='number') return v; const m=String(v||'').trim().match(/^([0-9.]+)\\s*(B|KB|MB|GB)?$/i); if(!m) return 0; return Math.round(Number(m[1])*({B:1,KB:1024,MB:1048576,GB:1073741824}[(m[2]||'B').toUpperCase()])); }\nconst size=bytes(b.fileSize); if(!size) throw new Error('Could not determine video size.');\nreturn [{json:{instructions:item.json.instructions || '', binaryField:key, fileName:b.fileName || 'video.mp4', mimeType:b.mimeType || 'video/mp4', fileSizeBytes:size, runId:$execution.id, submittedAt:new Date().toISOString()},binary:item.binary}];"
+      },
+      "id": "08789e5f-e61b-4bfb-a67e-179b9be93aed",
+      "name": "Validate Submission",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2144,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const start=$input.first(); const original=$('Validate Submission').item; return [{json:start.json,binary:original.binary}];"
+      },
+      "id": "51f67031-d90e-486b-9e3b-c76044e9785c",
+      "name": "Restore Video Binary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1472,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.cloudinary.com/v1_1/bft0qdr7/video/upload",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "={{$json.binaryField}}"
+            },
+            {
+              "name": "upload_preset",
+              "value": "n8n_media_video"
+            },
+            {
+              "name": "folder",
+              "value": "n8n-social-video"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "id": "85a93ca7-4096-482a-851f-9405baf5a7ce",
+      "name": "Cloudinary - Upload Video",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1920,
+        400
+      ],
+      "notesInFlow": true,
+      "notes": "Uses a restricted unsigned preset. For production, prefer a signed server-side upload credential."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/upload/v1beta/files",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Goog-Upload-Protocol",
+              "value": "resumable"
+            },
+            {
+              "name": "X-Goog-Upload-Command",
+              "value": "start"
+            },
+            {
+              "name": "X-Goog-Upload-Header-Content-Length",
+              "value": "={{$('Validate Submission').item.json.fileSizeBytes}}"
+            },
+            {
+              "name": "X-Goog-Upload-Header-Content-Type",
+              "value": "={{$('Validate Submission').item.json.mimeType}}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "29dc0f1d-df75-4e49-a736-d82dfd67a565",
+      "name": "Gemini - Start File Upload (CREDENTIAL REQUIRED)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1408,
+        560
+      ],
+      "notesInFlow": true,
+      "credentials": {},
+      "notes": "Select an n8n Header Auth credential whose header is x-goog-api-key."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$json.headers['x-goog-upload-url'] || $json.headers['X-Goog-Upload-URL']}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Length",
+              "value": "={{$('Validate Submission').item.json.fileSizeBytes}}"
+            },
+            {
+              "name": "X-Goog-Upload-Offset",
+              "value": "0"
+            },
+            {
+              "name": "X-Goog-Upload-Command",
+              "value": "upload, finalize"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "={{$('Validate Submission').item.json.binaryField}}",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "id": "841daf2e-585e-49b7-86d0-7dcac322ca38",
+      "name": "Gemini - Upload Video Bytes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1248,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 10
+      },
+      "id": "85fa1acb-f96c-47c7-80d8-8b3dd112f93f",
+      "name": "Wait for Gemini Processing",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -1024,
+        400
+      ],
+      "webhookId": "__REPLACE_WEBHOOKID__"
+    },
+    {
+      "parameters": {
+        "url": "=https://generativelanguage.googleapis.com/v1beta/{{$json.file.name}}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "bcac45d8-13b0-4aa5-961e-b0e02d978927",
+      "name": "Gemini - Check File (CREDENTIAL REQUIRED)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -800,
+        336
+      ],
+      "notesInFlow": true,
+      "credentials": {},
+      "notes": "Select the same Gemini Header Auth credential."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{$json.state}}",
+              "rightValue": "ACTIVE",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "fd947821-bcd1-44f6-bca6-d3875065a316",
+      "name": "Gemini File Active?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -576,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ contents: [{ parts: [{ inline_data: { mime_type: $(\"Validate Submission\").item.json.mimeType, data: $(\"Prepare Gemini Inline Video\").item.json.videoBase64 } }, { text: \"You are a senior social-media editor. Analyze the video and return strict JSON with exactly these string keys: video_summary, linkedin, instagram, x, tiktok, facebook. Never invent facts. LinkedIn: professional, up to 3 hashtags. Instagram: energetic hook, CTA, 3-8 hashtags. X: maximum 280 characters. TikTok: short hook-first, 3-5 hashtags. Facebook: accessible and community-oriented. User instructions: \" + $(\"Validate Submission\").item.json.instructions }] }], generationConfig: { responseMimeType: \"application/json\", temperature: 0.7 } }) }}",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "id": "333f0adc-0a89-438f-ad41-3ef7c9d72934",
+      "name": "Gemini - Analyze Inline Video and Write Captions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -352,
+        400
+      ],
+      "notesInFlow": true,
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 10000,
+      "credentials": {},
+      "notes": "Select the same Gemini Header Auth credential."
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $json.candidates?.[0]?.content?.parts?.map(p=>p.text||'').join('') || '';\nlet c; try { c=JSON.parse(raw.replace(/^```json\\s*|```$/g,'').trim()); } catch(e){ throw new Error('Gemini did not return valid caption JSON: '+raw.slice(0,500)); }\nfor (const k of ['video_summary','linkedin','instagram','x','tiktok','facebook']) if(typeof c[k] !== 'string') throw new Error(`Missing caption field: ${k}`);\nif ([...c.x].length > 280) throw new Error(`X caption is ${[...c.x].length} characters; expected at most 280.`);\nreturn [{json:{...c,cloudinaryUrl:$('Cloudinary - Upload Video').item.json.secure_url,cloudinaryPublicId:$('Cloudinary - Upload Video').item.json.public_id,runId:$('Validate Submission').item.json.runId,instructions:$('Validate Submission').item.json.instructions}}];"
+      },
+      "id": "0a890d14-9a1c-46e9-b3c8-181586852847",
+      "name": "Validate Caption JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -128,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "defineForm": "json",
+        "jsonOutput": "={{JSON.stringify([{fieldLabel:'Video summary',fieldName:'video_summary',fieldType:'textarea',defaultValue:$json.video_summary},{fieldLabel:'LinkedIn caption',fieldName:'linkedin',fieldType:'textarea',defaultValue:$json.linkedin,requiredField:true},{fieldLabel:'Instagram caption',fieldName:'instagram',fieldType:'textarea',defaultValue:$json.instagram,requiredField:true},{fieldLabel:'X caption (max 280 characters)',fieldName:'x',fieldType:'textarea',defaultValue:$json.x,requiredField:true},{fieldLabel:'TikTok caption',fieldName:'tiktok',fieldType:'textarea',defaultValue:$json.tiktok,requiredField:true},{fieldLabel:'Facebook caption',fieldName:'facebook',fieldType:'textarea',defaultValue:$json.facebook,requiredField:true},{fieldLabel:'Decision',fieldName:'decision',fieldType:'radio',fieldOptions:{values:[{option:'Approve'},{option:'Reject'}]},requiredField:true}])}}",
+        "options": {
+          "formTitle": "Review captions before publishing",
+          "formDescription": "Edit any caption, then approve or reject. Nothing is posted before approval.",
+          "buttonLabel": "Submit decision"
+        }
+      },
+      "id": "83d9902c-549c-4188-96ee-a8b909721db8",
+      "name": "Human Approval",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        96,
+        400
+      ],
+      "webhookId": "__REPLACE_WEBHOOKID__"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{$json.decision}}",
+              "rightValue": "Approve",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "fc8c28f4-cce4-4e9e-b82b-8d4faa5f09b3",
+      "name": "Approved?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        320,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{json:{status:'rejected',runId:$('Validate Submission').item.json.runId,posted:false,finishedAt:new Date().toISOString()}}];"
+      },
+      "id": "5de18bf8-3cf2-49be-821e-3ebcafc2a49d",
+      "name": "Log Rejection",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        768,
+        496
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const a=$json; const base={runId:$('Validate Submission').item.json.runId,videoUrl:$('Cloudinary - Upload Video').item.json.secure_url};\nreturn [\n{json:{...base,platform:'linkedin',caption:a.linkedin,ready:false,restriction:'Requires Videos API initialize/upload/finalize and Posts API; select OAuth credential and LINKEDIN_AUTHOR_URN.'}},\n{json:{...base,platform:'instagram',caption:a.instagram,ready:false,restriction:'Requires professional account, Meta publishing permissions, container creation and publish.'}},\n{json:{...base,platform:'x',caption:a.x,ready:false,restriction:'Requires eligible paid X API write/media access and user-context OAuth.'}},\n{json:{...base,platform:'tiktok',caption:a.tiktok,ready:false,restriction:'Requires approved video.publish; unaudited apps post private only; Cloudinary URL prefix must be verified.'}},\n{json:{...base,platform:'facebook',caption:a.facebook,ready:false,restriction:'Requires Page token and asynchronous Reels upload/publish.'}}\n];"
+      },
+      "id": "fd82ef32-b92f-455c-a38c-ba8ed7c1827c",
+      "name": "Create Five Publishing Jobs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        544,
+        304
+      ],
+      "notesInFlow": true,
+      "notes": "Safety gate: set ready=true only inside a fully configured official API branch."
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(i=>({json:{...i.json,status:i.json.ready?'ready_to_publish':'blocked_configuration',success:false,error:i.json.ready?null:i.json.restriction,loggedAt:new Date().toISOString()}}));"
+      },
+      "id": "df44298b-1cf1-4127-a732-e2fd994d96fb",
+      "name": "Publishing Safety and Status Log",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        768,
+        304
+      ],
+      "notesInFlow": true,
+      "notes": "This intentionally logs blocked_configuration until each platform's credentialed API sequence is connected. It never claims a post succeeded when it did not."
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "respondWith": "showText"
+      },
+      "id": "5427b22d-7199-41dd-91c4-ba0be68d1f90",
+      "name": "Completion Screen",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        992,
+        400
+      ],
+      "webhookId": "__REPLACE_WEBHOOKID__"
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first();\nconst key = item.json.binaryField;\nconst buffer = await this.helpers.getBinaryDataBuffer(0, key);\nreturn [{ json: { ...item.json, videoBase64: buffer.toString('base64') }, binary: item.binary }];"
+      },
+      "id": "6aa9cf7d-4908-45ff-a455-9d9557c871aa",
+      "name": "Prepare Gemini Inline Video",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1920,
+        240
+      ]
+    }
+  ],
+  "connections": {
+    "Submit Video and Instructions": {
+      "main": [
+        [
+          {
+            "node": "Validate Submission",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Submission": {
+      "main": [
+        [
+          {
+            "node": "Prepare Gemini Inline Video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cloudinary - Upload Video": {
+      "main": [
+        [
+          {
+            "node": "Gemini - Analyze Inline Video and Write Captions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini - Analyze Inline Video and Write Captions": {
+      "main": [
+        [
+          {
+            "node": "Validate Caption JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Caption JSON": {
+      "main": [
+        [
+          {
+            "node": "Human Approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Human Approval": {
+      "main": [
+        [
+          {
+            "node": "Approved?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approved?": {
+      "main": [
+        [
+          {
+            "node": "Create Five Publishing Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Rejection",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Rejection": {
+      "main": [
+        [
+          {
+            "node": "Completion Screen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Five Publishing Jobs": {
+      "main": [
+        [
+          {
+            "node": "Publishing Safety and Status Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Publishing Safety and Status Log": {
+      "main": [
+        [
+          {
+            "node": "Completion Screen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Gemini Inline Video": {
+      "main": [
+        [
+          {
+            "node": "Cloudinary - Upload Video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "7643101b82c55f9d9483742d0aede97f9c926a1dfd41fa43ef02a24a3d98a1a3"
+  }
+}
